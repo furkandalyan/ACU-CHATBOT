@@ -56,7 +56,7 @@ The system consists of three main components:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-repo/acibadem-chatbot.git
+git clone https://github.com/furkandalyan/ACU-CHATBOT.git
 cd acibadem-chatbot
 ```
 
