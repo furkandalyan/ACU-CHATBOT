@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ACU AI Asistan — Giriş</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,sans-serif;height:100vh;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#0a1528;}
+.video-bg{position:fixed;inset:0;z-index:0;overflow:hidden;}
+.video-bg iframe{position:absolute;top:50%;left:50%;width:177.78vh;height:100vh;min-width:100%;min-height:56.25vw;transform:translate(-50%,-50%);border:none;pointer-events:none;}
+.overlay{position:fixed;inset:0;background:rgba(6,14,35,0.72);z-index:1;}
+.card{position:relative;z-index:2;width:400px;background:rgba(255,255,255,0.07);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.13);border-radius:18px;padding:32px 30px;display:flex;flex-direction:column;align-items:center;}
+.logo-row{display:flex;align-items:center;gap:12px;margin-bottom:6px;}
+.badge{width:42px;height:42px;border-radius:10px;background:#E8500A;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:white;letter-spacing:0.5px;}
+.uname{font-size:15px;font-weight:600;color:#fff;}
+.usub{font-size:11px;color:rgba(255,255,255,0.5);margin-top:1px;}
+.divider{width:100%;height:0.5px;background:rgba(255,255,255,0.12);margin:18px 0;}
+.choose-title{font-size:15px;font-weight:500;color:#fff;margin-bottom:3px;align-self:flex-start;}
+.choose-sub{font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:20px;align-self:flex-start;}
+.choice-btn{width:100%;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);display:flex;align-items:center;gap:14px;cursor:pointer;transition:all 0.2s;margin-bottom:10px;font-family:inherit;}
+.choice-btn:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.3);}
+.choice-btn.orange{border-color:rgba(232,80,10,0.5);background:rgba(232,80,10,0.08);}
+.choice-btn.orange:hover{background:rgba(232,80,10,0.15);border-color:#E8500A;}
+.choice-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+.choice-icon.blue{background:rgba(26,58,122,0.6);}
+.choice-icon.orange{background:rgba(232,80,10,0.2);}
+.choice-texts{text-align:left;}
+.choice-main{font-size:13px;font-weight:500;color:#fff;}
+.choice-desc{font-size:11px;color:rgba(255,255,255,0.45);margin-top:2px;}
+.choice-arrow{margin-left:auto;font-size:18px;color:rgba(255,255,255,0.3);}
+.form-section{width:100%;display:none;flex-direction:column;}
+.form-section.show{display:flex;}
+.form-title{font-size:15px;font-weight:500;color:#fff;margin-bottom:3px;}
+.form-sub{font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:18px;}
+.inp-wrap{width:100%;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.13);border-radius:10px;padding:11px 14px;transition:border-color 0.2s;margin-bottom:10px;}
+.inp-wrap:focus-within{border-color:rgba(232,80,10,0.7);}
+.inp-icon{font-size:14px;flex-shrink:0;opacity:0.55;}
+.inp{flex:1;background:transparent;border:none;outline:none;font-size:13px;color:#fff;font-family:inherit;}
+.inp::placeholder{color:rgba(255,255,255,0.3);}
+.submit-btn{width:100%;padding:12px;background:#E8500A;border:none;border-radius:10px;color:white;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.15s;margin-top:4px;}
+.submit-btn:hover{background:#ff6820;transform:scale(1.01);}
+.submit-btn:disabled{background:#666;cursor:not-allowed;transform:none;}
+.back-btn{background:none;border:none;color:rgba(255,255,255,0.45);font-size:12px;cursor:pointer;font-family:inherit;margin-top:12px;display:flex;align-items:center;gap:5px;padding:0;}
+.back-btn:hover{color:rgba(255,255,255,0.8);}
+.guest-info{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+.guest-info-text{font-size:12px;color:rgba(255,255,255,0.55);line-height:1.6;}
+.note{font-size:11px;color:rgba(255,255,255,0.3);text-align:center;margin-top:16px;}
+.error-msg{font-size:12px;color:#ff6b6b;margin-top:8px;text-align:center;display:none;}
+.error-msg.show{display:block;}
+</style>
+</head>
+<body>
+
+<div class="video-bg">
+  <iframe
+    src="https://www.youtube.com/embed/roVSOi7zeGQ?autoplay=1&mute=1&loop=1&playlist=roVSOi7zeGQ&controls=0&showinfo=0&rel=0&modestbranding=1&playsinline=1&enablejsapi=1"
+    allow="autoplay; encrypted-media; fullscreen"
+    allowfullscreen>
+  </iframe>
+</div>
+<div class="overlay"></div>
+
+<div class="card">
+  <div class="logo-row">
+    <div class="badge">ACU</div>
+    <div>
+      <div class="uname">Acıbadem Üniversitesi</div>
+      <div class="usub">AI Bilgi Asistanı</div>
+    </div>
+  </div>
+  <div class="divider"></div>
+
+  <div id="chooseScreen" style="width:100%">
+    <div class="choose-title">Nasıl devam etmek istersiniz?</div>
+    <div class="choose-sub">Lütfen size uygun seçeneği seçin</div>
+    <button class="choice-btn orange" onclick="showForm('student')">
+      <div class="choice-icon orange">🎓</div>
+      <div class="choice-texts">
+        <div class="choice-main">ACU Öğrencisiyim</div>
+        <div class="choice-desc">Öğrenci numaranızla giriş yapın</div>
+      </div>
+      <div class="choice-arrow">›</div>
+    </button>
+    <button class="choice-btn" onclick="showForm('guest')">
+      <div class="choice-icon blue">👤</div>
+      <div class="choice-texts">
+        <div class="choice-main">ACU Öğrencisi Değilim</div>
+        <div class="choice-desc">Ad soyad ile devam edin</div>
+      </div>
+      <div class="choice-arrow">›</div>
+    </button>
+  </div>
+
+  <div class="form-section" id="studentForm">
+    <div class="form-title">Öğrenci Girişi</div>
+    <div class="form-sub">ACU öğrenci bilgilerinizle giriş yapın</div>
+    <div class="inp-wrap">
+      <span class="inp-icon">🎓</span>
+      <input class="inp" id="studentNumber" placeholder="Öğrenci numarası (örn: 221401058)" type="text"/>
+    </div>
+    <div class="inp-wrap">
+      <span class="inp-icon">🔒</span>
+      <input class="inp" id="studentPassword" placeholder="Şifre" type="password"/>
+    </div>
+    <div class="error-msg" id="studentError"></div>
+    <button class="submit-btn" id="studentBtn" onclick="doStudentLogin()">Giriş Yap</button>
+    <button class="back-btn" onclick="goBack()">‹ Geri dön</button>
+  </div>
+
+  <div class="form-section" id="guestForm">
+    <div class="form-title">Misafir Girişi</div>
+    <div class="form-sub">Temel bilgilerinizle devam edin</div>
+    <div class="guest-info">
+      <div class="guest-info-text">Misafir olarak üniversite hakkında genel sorular sorabilirsiniz.</div>
+    </div>
+    <div class="inp-wrap">
+      <span class="inp-icon">👤</span>
+      <input class="inp" id="guestName" placeholder="Adınız Soyadınız" type="text"/>
+    </div>
+    <div class="inp-wrap">
+      <span class="inp-icon">✉</span>
+      <input class="inp" id="guestEmail" placeholder="E-posta (isteğe bağlı)" type="email"/>
+    </div>
+    <div class="error-msg" id="guestError"></div>
+    <button class="submit-btn" id="guestBtn" onclick="doGuestLogin()">Devam Et</button>
+    <button class="back-btn" onclick="goBack()">‹ Geri dön</button>
+  </div>
+
+  <div class="note">Acıbadem Üniversitesi · acibadem.edu.tr</div>
+</div>
+
+<script>
+function showForm(type){
+  document.getElementById('chooseScreen').style.display='none';
+  document.getElementById(type==='student'?'studentForm':'guestForm').classList.add('show');
+}
+function goBack(){
+  document.getElementById('chooseScreen').style.display='block';
+  document.getElementById('studentForm').classList.remove('show');
+  document.getElementById('guestForm').classList.remove('show');
+  document.getElementById('studentError').classList.remove('show');
+  document.getElementById('guestError').classList.remove('show');
+}
+function showError(id,msg){const el=document.getElementById(id);el.textContent=msg;el.classList.add('show');}
+
+async function doStudentLogin(){
+  const num=document.getElementById('studentNumber').value.trim();
+  const pwd=document.getElementById('studentPassword').value.trim();
+  if(!num){showError('studentError','Öğrenci numarası gereklidir.');return;}
+  const btn=document.getElementById('studentBtn');
+  btn.disabled=true;btn.textContent='Giriş yapılıyor...';
+  try{
+    const res=await fetch('/api/login/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_type:'student',student_number:num,password:pwd})});
+    const data=await res.json();
+    if(data.success){window.location.href='/';}
+    else{showError('studentError',data.error||'Giriş başarısız.');btn.disabled=false;btn.textContent='Giriş Yap';}
+  }catch(e){showError('studentError','Bağlantı hatası.');btn.disabled=false;btn.textContent='Giriş Yap';}
+}
+
+async function doGuestLogin(){
+  const name=document.getElementById('guestName').value.trim();
+  const email=document.getElementById('guestEmail').value.trim();
+  if(!name){showError('guestError','Ad soyad gereklidir.');return;}
+  const btn=document.getElementById('guestBtn');
+  btn.disabled=true;btn.textContent='Devam ediliyor...';
+  try{
+    const res=await fetch('/api/login/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_type:'guest',name:name,email:email})});
+    const data=await res.json();
+    if(data.success){window.location.href='/';}
+    else{showError('guestError',data.error||'Bir hata oluştu.');btn.disabled=false;btn.textContent='Devam Et';}
+  }catch(e){showError('guestError','Bağlantı hatası.');btn.disabled=false;btn.textContent='Devam Et';}
+}
+
+document.getElementById('studentPassword').addEventListener('keypress',e=>{if(e.key==='Enter')doStudentLogin();});
+document.getElementById('guestName').addEventListener('keypress',e=>{if(e.key==='Enter')doGuestLogin();});
+</script>
+</body>
+</html>
