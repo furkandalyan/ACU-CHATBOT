@@ -1,10 +1,26 @@
 from django.contrib import admin
-from .models import ChatSession, ChatMessage, UniversityContent, Faculty, Department, Course, ScraperLog
+from .models import (
+    ChatSession,
+    ChatMessage,
+    UniversityContent,
+    Faculty,
+    Department,
+    Course,
+    ScraperLog,
+    UserProfile,
+)
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("name", "user_type", "student_number", "email", "created_at")
+    list_filter = ("user_type",)
+    search_fields = ("name", "student_number", "email")
 
 
 @admin.register(ChatSession)
 class ChatSessionAdmin(admin.ModelAdmin):
-    list_display   = ('session_id', 'created_at')
+    list_display   = ('session_id', 'user_profile', 'created_at')
     ordering       = ('-created_at',)
     readonly_fields = ('session_id', 'created_at')
 

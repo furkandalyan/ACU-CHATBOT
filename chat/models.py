@@ -8,6 +8,12 @@ import uuid
 
 class ChatSession(models.Model):
     session_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user_profile = models.ForeignKey(
+        "UserProfile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -34,6 +40,36 @@ class ChatMessage(models.Model):
         ordering = ['created_at']
         verbose_name = "Chat Mesajı"
         verbose_name_plural = "Chat Mesajları"
+
+
+class UserProfile(models.Model):
+    USER_TYPE_CHOICES = [
+        ("student", "Öğrenci"),
+        ("guest", "Misafir"),
+    ]
+
+    name = models.CharField(max_length=200)
+    student_number = models.CharField(
+        max_length=20,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+    email = models.EmailField(null=True, blank=True)
+    user_type = models.CharField(
+        max_length=10,
+        choices=USER_TYPE_CHOICES,
+        default="guest",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Kullanıcı Profili"
+        verbose_name_plural = "Kullanıcı Profilleri"
+
+    def __str__(self):
+        return self.name
 
 
 # ─────────────────────────────────────────────
