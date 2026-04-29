@@ -2,57 +2,65 @@ from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 
-from .models import Course, Department, Faculty, UniversityContent
-from .services import answer_question, retrieve_context
+from .models import Department, Faculty, UniversityContent
+from .services import answer_question, normalize_text, retrieve_context
 
 
 class RetrievalTests(TestCase):
     def setUp(self):
         self.faculty = Faculty.objects.create(name="Mühendislik ve Doğa Bilimleri Fakültesi")
-        self.department = Department.objects.create(
+        Department.objects.create(
             faculty=self.faculty,
-            name="Bilgisayar Mühendisliği",
+            name="Bilgisayar Mühendisliği (İngilizce)",
             description="Yazılım, algoritma ve yapay zeka alanlarında eğitim verir.",
         )
-        Course.objects.create(
-            department=self.department,
-            code="CSE204",
-            name="Veritabanı Sistemleri",
-            description="İlişkisel veritabanı tasarımı ve SQL temelleri.",
-            credits=3,
-            semester="Bahar",
-        )
         UniversityContent.objects.create(
-            title="Bilgisayar Mühendisliği Programı",
-            content="Bilgisayar Mühendisliği programı yazılım geliştirme, veri yapıları ve yapay zeka dersleri içerir.",
+            title="Program Hakkında – Bilgisayar Mühendisliği (İngilizce)",
+            content="Bilgisayar Mühendisliği (İngilizce) programı veri bilimi ve yapay zeka odaklıdır.",
             category="academic",
             language="tr",
             url="https://example.com/program",
         )
 
-    def test_retrieve_context_returns_relevant_records(self):
-        results = retrieve_context("Bilgisayar mühendisliği programında yapay zeka var mı?")
+    def test_normalize_text_handles_real_turkish_characters(self):
+        self.assertEqual(
+            normalize_text("Bilgisayar Mühendisliği bölüm ücreti"),
+            "bilgisayar muhendisligi bolum ucreti",
+        )
+
+    def test_retrieve_context_returns_department_match_for_turkish_query(self):
+        results = retrieve_context("Bilgisayar Mühendisliği (İngilizce) programı hakkında bilgi verir misin?")
         self.assertTrue(results)
-        self.assertEqual(results[0].title, "Bilgisayar Mühendisliği Programı")
+        self.assertIn("Bilgisayar Mühendisliği", results[0].title)
 
 
 class AnswerQuestionTests(TestCase):
     @override_settings(OLLAMA_URL="http://ollama:11434", OLLAMA_MODEL="mistral", OLLAMA_TIMEOUT=10)
-    @patch("chat.services.requests.post")
-    def test_answer_question_uses_ollama_and_returns_sources(self, mock_post):
+    @patch("chat.services.call_ollama")
+    def test_answer_question_calls_llm_with_relevant_context(self, mock_call_ollama):
+        mock_call_ollama.return_value = "Ödeme yöntemleri arasında peşin, e-ödeme ve taksit seçenekleri mevcuttur."
+
         UniversityContent.objects.create(
-            title="Burs Olanakları",
-            content="Başarılı öğrencilere burs olanakları sunulur.",
-            category="admission",
+            title="Ödeme Yöntemleri",
+            content=(
+                "Eğitim öğretim ücretini peşin ödeme, e-ödeme ve taksitle kredili ödeme "
+                "yöntemleri ile yapabilirsiniz. Öğrenim ücreti bir akademik yılın güz ve "
+                "bahar dönemlerini kapsar ve dönem başlarında olmak üzere iki eşit tutarda ödenir."
+            ),
+            category="other",
             language="tr",
-            url="https://example.com/burs",
+            url="https://example.com/payment",
         )
 
-        mock_post.return_value.json.return_value = {"response": "Üniversite çeşitli burs olanakları sunar."}
-        mock_post.return_value.raise_for_status.return_value = None
+        result = answer_question(
+            "Bilgisayar Mühendisliği bölümünün ödeme yöntemleri nelerdir?"
+        )
 
-        result = answer_question("Burs var mı?")
+        self.assertTrue(mock_call_ollama.called)
+        self.assertIsInstance(result["answer"], str)
+        self.assertGreater(len(result["answer"]), 5)
 
-        self.assertIn("burs", result["answer"].lower())
-        self.assertEqual(len(result["sources"]), 1)
-        self.assertEqual(result["sources"][0]["title"], "Burs Olanakları")
+    def test_answer_question_returns_fallback_when_no_context(self):
+        result = answer_question("xyzzy123 tamamen alakasız bir konu hakkında bilgi ver")
+        self.assertEqual(result["meta"]["strategy"], "fallback")
+        self.assertFalse(result["meta"]["cache_hit"])

@@ -2,34 +2,46 @@ import json
 import traceback
 from collections import OrderedDict
 
-from django.db.models import Prefetch
-from django.http import JsonResponse
+from django.conf import settings
+from django.core.cache import cache
+from django.db.models import Count, Prefetch
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import ChatMessage, ChatSession, Department, UserProfile
-from .services import answer_question, retrieve_context
+from .services import (
+    answer_question, retrieve_context, stream_ollama,
+    build_fallback_answer, serialize_sources, normalize_text,
+    expand_question_for_llm, sanitize_answer, _clean_for_llm,
+)
 
 
 def should_expand_with_context(question: str) -> bool:
     lowered = question.strip().lower()
-    if len(lowered.split()) <= 4:
+    words = lowered.split()
+    referential_markers = {
+        "o",
+        "bu",
+        "şu",
+        "su",
+        "onun",
+        "bunun",
+        "şunun",
+        "sunlar",
+        "bunlar",
+        "onlar",
+        "peki",
+        "ya",
+        "aynı",
+        "ayni",
+    }
+    if any(word in referential_markers for word in words):
         return True
     follow_up_markers = [
-        "kimdir",
-        "kim",
-        "bölüm başkanı",
-        "bolum baskani",
-        "dekan",
         "hangi ders",
         "kaç kredi",
         "kac kredi",
-        "oryantasyon",
-        "staj",
-        "ücret",
-        "ucret",
-        "başvuru",
-        "basvuru",
     ]
     return any(marker in lowered for marker in follow_up_markers)
 
@@ -195,22 +207,35 @@ def clean_program_label(name: str) -> str:
 
 
 def build_program_structure():
+    cache_key = "chat:program_structure:v1"
+    cached_structure = cache.get(cache_key)
+    if cached_structure is not None:
+        return cached_structure
+
+    department_names_by_faculty = {}
+    for faculty_name, department_name in Department.objects.values_list(
+        "faculty__name", "name"
+    ):
+        cleaned_name = clean_program_label(department_name)
+        department_names_by_faculty.setdefault(faculty_name, set()).add(cleaned_name)
+
     structure = []
     for category_name, faculty_names in PROGRAM_CATEGORY_ORDER.items():
         faculties = []
         for faculty_name in faculty_names:
-            existing_department_names = set(
-                clean_program_label(name)
-                for name in Department.objects.filter(faculty__name=faculty_name)
-                .values_list("name", flat=True)
+            existing_department_names = department_names_by_faculty.get(
+                faculty_name, set()
             )
             departments = [
                 name
                 for name in CANONICAL_PROGRAMS.get(faculty_name, [])
-                if name in existing_department_names or faculty_name in {"Tıp Fakültesi", "Eczacılık Fakültesi"}
+                if name in existing_department_names
+                or faculty_name in {"Tıp Fakültesi", "Eczacılık Fakültesi"}
             ]
             faculties.append({"name": faculty_name, "depts": departments})
         structure.append({"cat": category_name, "facs": faculties})
+
+    cache.set(cache_key, structure, 600)
     return structure
 
 
@@ -298,6 +323,7 @@ def chat_view(request):
 
     try:
         session = ChatSession.objects.get(session_id=session_id, user_profile_id=user_id)
+        request.session['chat_session_id'] = str(session.session_id)
         messages = session.messages.all()
     except ChatSession.DoesNotExist:
         session = ChatSession.objects.create(user_profile_id=user_id)
@@ -307,17 +333,21 @@ def chat_view(request):
 
     sessions = (
         ChatSession.objects.filter(user_profile_id=user_id)
-        .prefetch_related(Prefetch("messages", queryset=ChatMessage.objects.order_by("created_at")))
+        .annotate(message_count=Count("messages"))
+        .prefetch_related(
+            Prefetch("messages", queryset=ChatMessage.objects.order_by("created_at"))
+        )
         .order_by("-created_at")
     )
     session_summaries = []
     for item in sessions:
-        first_message = item.messages.all()[0] if item.messages.exists() else None
+        session_messages = list(item.messages.all())
+        first_message = session_messages[0] if session_messages else None
         session_summaries.append(
             {
                 "session_id": str(item.session_id),
                 "preview": first_message.question if first_message else "Yeni sohbet",
-                "message_count": item.messages.count(),
+                "message_count": item.message_count,
                 "is_active": str(item.session_id) == str(session.session_id),
             }
         )
@@ -349,6 +379,7 @@ def chat_api(request):
                 session_id=session_id,
                 user_profile_id=request.session.get('user_id'),
             )
+            request.session['chat_session_id'] = str(session.session_id)
         except ChatSession.DoesNotExist:
             session = ChatSession.objects.create(user_profile_id=request.session.get('user_id'))
             request.session['chat_session_id'] = str(session.session_id)
@@ -358,7 +389,17 @@ def chat_api(request):
         if last_message and should_expand_with_context(question):
             effective_question = f"{last_message.question} {question}"
 
-        result = answer_question(question=effective_question, language='tr')
+        # Pass last 3 turns as conversation context for multi-turn awareness
+        history = list(
+            session.messages.order_by('-created_at')[:6].values('question', 'answer')
+        )
+        history.reverse()
+
+        result = answer_question(
+            question=effective_question,
+            language='tr',
+            conversation_history=history if history else None,
+        )
         answer = result['answer']
 
         ChatMessage.objects.create(
@@ -367,13 +408,15 @@ def chat_api(request):
             answer=answer
         )
 
-        return JsonResponse(
-            {
-                'answer': answer,
-                'session_id': str(session.session_id),
-                'sources': result['sources'],
-            }
-        )
+        payload = {
+            'answer': answer,
+            'session_id': str(session.session_id),
+            'sources': result['sources'],
+        }
+        if settings.DEBUG and result.get('meta'):
+            payload['debug'] = result['meta']
+
+        return JsonResponse(payload)
 
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Gecersiz JSON formati.'}, status=400)
@@ -463,6 +506,94 @@ def delete_session_api(request, session_id):
         redirect_url = f'/?session={current_session_id}' if current_session_id else '/'
 
     return JsonResponse({'success': True, 'redirect': redirect_url})
+
+
+@csrf_exempt
+def chat_stream_api(request):
+    """SSE streaming endpoint — yields tokens from Ollama as they are generated."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Sadece POST isteği kabul edilir.'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        question = data.get('question', '').strip()
+        session_id = data.get('session_id', '')
+        if not question:
+            return JsonResponse({'error': 'Lütfen bir soru yazın.'}, status=400)
+
+        try:
+            session = ChatSession.objects.get(
+                session_id=session_id,
+                user_profile_id=request.session.get('user_id'),
+            )
+        except ChatSession.DoesNotExist:
+            session = ChatSession.objects.create(user_profile_id=request.session.get('user_id'))
+            request.session['chat_session_id'] = str(session.session_id)
+
+        effective_question = question
+        last_message = session.messages.order_by('-created_at').first()
+        if last_message and should_expand_with_context(question):
+            effective_question = f"{last_message.question} {question}"
+
+        history = list(session.messages.order_by('-created_at')[:6].values('question', 'answer'))
+        history.reverse()
+
+        contexts = retrieve_context(effective_question, language='tr', limit=6)
+        top_score = max((c.score for c in contexts), default=0)
+        sources_data = serialize_sources(contexts)
+
+        # Filter contexts whose body is all URLs (no real text after cleaning)
+        generation_contexts = [c for c in contexts[:2] if len(_clean_for_llm(c.body)) >= 30]
+
+        def sse_event(payload: dict) -> str:
+            return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        def generate():
+            full_answer_parts = []
+
+            if not contexts or top_score < 6 or not generation_contexts:
+                fallback = build_fallback_answer(contexts)
+                full_answer_parts.append(fallback)
+                yield sse_event({"token": fallback})
+                yield sse_event({"done": True, "session_id": str(session.session_id), "sources": sources_data})
+                ChatMessage.objects.create(session=session, question=question, answer=fallback)
+                return
+
+            try:
+                word_count = len(normalize_text(effective_question).split())
+                max_tokens = 120 if word_count <= 5 else 160
+                llm_question = expand_question_for_llm(effective_question)
+                for token in stream_ollama(
+                    question=llm_question,
+                    contexts=generation_contexts,
+                    conversation_history=history or None,
+                    max_tokens=max_tokens,
+                    temperature=0.6,
+                ):
+                    full_answer_parts.append(token)
+                    yield sse_event({"token": token})
+            except Exception:
+                error_msg = "Şu anda cevap üretemiyorum. Lütfen tekrar deneyin."
+                full_answer_parts.append(error_msg)
+                yield sse_event({"token": error_msg})
+
+            full_answer = sanitize_answer("".join(full_answer_parts).strip())
+            if not full_answer:
+                full_answer = build_fallback_answer(contexts)
+
+            ChatMessage.objects.create(session=session, question=question, answer=full_answer)
+            yield sse_event({"done": True, "session_id": str(session.session_id), "sources": sources_data})
+
+        response = StreamingHttpResponse(generate(), content_type='text/event-stream; charset=utf-8')
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        return response
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Geçersiz JSON formatı.'}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return JsonResponse({'error': f'Hata: {e}'}, status=500)
 
 
 @csrf_exempt

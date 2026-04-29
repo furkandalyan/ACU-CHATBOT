@@ -174,9 +174,10 @@ body{
 .hist-item.active{background:rgba(255,255,255,0.1);color:#e8f2ff;padding-left:12px;}
 .hist-item.active::before{width:3px;}
 .hist-item.removing{
-  opacity:0;transform:translateX(-20px) scaleY(0.5);
+  opacity:0;transform:translateX(-28px) scale(0.96);
   max-height:0;margin-bottom:0;padding-top:0;padding-bottom:0;
-  transition:all 0.3s var(--ease);
+  filter:grayscale(1);
+  transition:all 0.32s var(--ease);
 }
 .hist-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hist-del{
@@ -929,7 +930,7 @@ async function deleteHist(e,btn,sessionId){
   e.stopPropagation();
   const item=btn.closest('.hist-item');
   item.classList.add('removing');
-  setTimeout(()=>item.remove(),300);
+  setTimeout(()=>item.remove(),340);
   try{
     const response=await fetch(`/api/session/${sessionId}/delete/`,{method:'POST'});
     const data=await response.json();
@@ -1031,18 +1032,65 @@ function saveProfile(){
 function triggerFile(){document.getElementById('fileInput').click();}
 function handleFile(e){const f=e.target.files[0];if(f)document.getElementById('inp').value=f.name+' yüklendi';}
 function getTime(){const n=new Date();return n.getHours()+':'+String(n.getMinutes()).padStart(2,'0');}
-function addHist(q){
+function shortenHistoryTitle(text){
+  return text.length>24?text.slice(0,24)+'...':text;
+}
+function escapeText(text){
+  const div=document.createElement('div');
+  div.textContent=text;
+  return div.innerHTML;
+}
+function updateActiveHistory(q){
   const l=document.getElementById('histList');
   const empty=document.getElementById('emptyHist');
   if(empty)empty.remove();
   document.querySelectorAll('.hist-item').forEach(x=>x.classList.remove('active'));
-  const d=document.createElement('div');d.className='hist-item active';
-  d.innerHTML=`<span class="hist-text">${q.length>24?q.slice(0,24)+'...':q}</span><button class="hist-del" onclick="deleteHist(event,this)">✕</button>`;
-  l.prepend(d);
+  let item=l.querySelector(`.hist-item[data-session-id="${SESSION_ID}"]`);
+  if(!item){
+    item=document.createElement('div');
+    item.className='hist-item active';
+    item.dataset.sessionId=SESSION_ID;
+    item.onclick=()=>openSession(SESSION_ID);
+    item.innerHTML=`<span class="hist-text"></span><button class="hist-del" onclick="deleteHist(event,this,'${SESSION_ID}')">✕</button>`;
+    l.prepend(item);
+  }
+  item.classList.add('active');
+  const textEl=item.querySelector('.hist-text');
+  if(textEl && (!textEl.textContent || textEl.textContent==='Yeni sohbet')){
+    textEl.textContent=shortenHistoryTitle(q);
+  }
 }
 function updateChar(){
   const count=document.getElementById('inp').value.length;
   document.getElementById('charC').textContent=count>0?`${count}`:'';}
+
+function renderAssistantAnswer(streamText,cursor,feedbackBox,btn,msgs,answer){
+  const totalLength=answer.length;
+  if(totalLength<=180){
+    streamText.textContent=answer;
+    cursor.style.display='none';
+    feedbackBox.classList.add('show');
+    btn.disabled=false;
+    msgs.scrollTop=msgs.scrollHeight;
+    return;
+  }
+
+  let index=0;
+  const chunkSize=Math.max(24,Math.ceil(totalLength/12));
+  function paint(){
+    index=Math.min(index+chunkSize,totalLength);
+    streamText.textContent=answer.slice(0,index);
+    msgs.scrollTop=msgs.scrollHeight;
+    if(index<totalLength){
+      requestAnimationFrame(paint);
+      return;
+    }
+    cursor.style.display='none';
+    feedbackBox.classList.add('show');
+    btn.disabled=false;
+  }
+  requestAnimationFrame(paint);
+}
 
 async function send(){
   const inp=document.getElementById('inp'),btn=document.getElementById('sbtn'),msgs=document.getElementById('msgs');
@@ -1053,10 +1101,12 @@ async function send(){
   const hero=msgs.querySelector('.welcome-hero');
   if(hero)hero.remove();
 
-  const tm=getTime();addHist(t);
+  const tm=getTime();updateActiveHistory(t);
 
   const u=document.createElement('div');u.className='msg user';
-  u.innerHTML=`<div class="av user" style="background:linear-gradient(135deg,${selColor},${selColor}cc)">${avName[0].toUpperCase()}</div><div class="msgcol"><div class="bbl">${t}</div><div class="msg-actions"><button class="act-btn" onclick="copyText('${t.replace(/'/g,"\\'")}')">⧉ Kopyala</button><button class="act-btn" onclick="editMsg(this,'${t.replace(/'/g,"\\'")}')">✎ Düzenle</button></div><div class="edit-area"><textarea class="edit-input" rows="2">${t}</textarea><div class="edit-btns"><button class="edit-btn cancel" onclick="cancelEdit(this)">İptal</button><button class="edit-btn save" onclick="saveEdit(this)">Gönder</button></div></div><div class="ts">${tm}</div></div>`;
+  const safeT=escapeText(t);
+  const jsT=t.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+  u.innerHTML=`<div class="av user" style="background:linear-gradient(135deg,${selColor},${selColor}cc)">${avName[0].toUpperCase()}</div><div class="msgcol"><div class="bbl">${safeT}</div><div class="msg-actions"><button class="act-btn" onclick="copyText('${jsT}')">⧉ Kopyala</button><button class="act-btn" onclick="editMsg(this,'${jsT}')">✎ Düzenle</button></div><div class="edit-area"><textarea class="edit-input" rows="2">${safeT}</textarea><div class="edit-btns"><button class="edit-btn cancel" onclick="cancelEdit(this)">İptal</button><button class="edit-btn save" onclick="saveEdit(this)">Gönder</button></div></div><div class="ts">${tm}</div></div>`;
   msgs.appendChild(u);
 
   const b=document.createElement('div');b.className='msg bot';
@@ -1068,24 +1118,38 @@ async function send(){
   const feedbackBox=b.querySelector('.feedback-box');
 
   try{
-    const response=await fetch('/api/chat/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:t,session_id:SESSION_ID})});
-    const data=await response.json();
-    if(data.session_id){SESSION_ID=data.session_id;}
-    const answer=data.answer||data.error||'Bir hata oluştu.';
     cursor.style.display='inline';
-    const words=answer.split(' ');
-    let i=0;
-    const interval=setInterval(()=>{
-      if(i<words.length){
-        streamText.textContent+=(i>0?' ':'')+words[i];i++;
-        msgs.scrollTop=msgs.scrollHeight;
-      } else {
-        clearInterval(interval);
-        cursor.style.display='none';
-        feedbackBox.classList.add('show');
-        btn.disabled=false;
+    const response=await fetch('/api/chat/stream/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:t,session_id:SESSION_ID})});
+    if(!response.ok){throw new Error('HTTP '+response.status);}
+    const reader=response.body.getReader();
+    const decoder=new TextDecoder('utf-8');
+    let buffer='';
+    let fullText='';
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const parts=buffer.split('\n\n');
+      buffer=parts.pop();
+      for(const part of parts){
+        const line=part.trim();
+        if(!line.startsWith('data:'))continue;
+        let evt;
+        try{evt=JSON.parse(line.slice(5).trim());}catch{continue;}
+        if(evt.token){
+          fullText+=evt.token;
+          streamText.textContent=fullText;
+          msgs.scrollTop=msgs.scrollHeight;
+        }
+        if(evt.done){
+          if(evt.session_id)SESSION_ID=evt.session_id;
+          cursor.style.display='none';
+          feedbackBox.classList.add('show');
+          btn.disabled=false;
+        }
       }
-    },55);
+    }
+    if(!fullText){streamText.textContent='Cevap alınamadı. Lütfen tekrar deneyin.';}
   }catch(e){
     streamText.textContent='Bağlantı hatası. Lütfen tekrar deneyin.';
     cursor.style.display='none';btn.disabled=false;
