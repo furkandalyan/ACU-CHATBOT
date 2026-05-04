@@ -276,6 +276,12 @@ body{
 
 /* ───── MAIN ───── */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--topbar);transition:background 0.3s var(--ease);}
+body.history-clearing .main{animation:chatShiftLeft 0.58s var(--ease-spring) both;}
+@keyframes chatShiftLeft{
+  0%{transform:translateX(0) scale(1)}
+  42%{transform:translateX(-28px) scale(0.992)}
+  100%{transform:translateX(0) scale(1)}
+}
 
 .topbar-row{
   padding:13px 22px;
@@ -495,6 +501,7 @@ body{
   animation:cursorBlink 0.7s ease-in-out infinite;
   color:var(--accent);
 }
+.stream-text{white-space:pre-wrap;}
 @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}
 
 /* ───── INPUT BAR ───── */
@@ -928,6 +935,7 @@ async function createNewChat(){
 }
 async function deleteHist(e,btn,sessionId){
   e.stopPropagation();
+  document.getElementById('body').classList.add('history-clearing');
   const item=btn.closest('.hist-item');
   item.classList.add('removing');
   setTimeout(()=>item.remove(),340);
@@ -936,10 +944,12 @@ async function deleteHist(e,btn,sessionId){
     const data=await response.json();
     if(data.redirect){window.location.href=data.redirect;return;}
   }catch(_e){}
+  setTimeout(()=>document.getElementById('body').classList.remove('history-clearing'),620);
   checkEmptyHist();
 }
 async function clearAllHistory(){
   if(!confirm('Tüm geçmiş silinecek. Emin misiniz?'))return;
+  document.getElementById('body').classList.add('history-clearing');
   const items=[...document.querySelectorAll('.hist-item')];
   items.forEach((item,index)=>setTimeout(()=>item.classList.add('removing'),index*40));
   try{
@@ -1092,6 +1102,49 @@ function renderAssistantAnswer(streamText,cursor,feedbackBox,btn,msgs,answer){
   requestAnimationFrame(paint);
 }
 
+function createTypewriter(streamText,msgs,onComplete){
+  let pending='',typing=false,done=false,closed=false;
+  function finishIfReady(){
+    if(done && !pending && !typing && !closed){
+      closed=true;
+      onComplete();
+    }
+  }
+  function tick(){
+    if(!pending){
+      typing=false;
+      finishIfReady();
+      return;
+    }
+    typing=true;
+    const step=pending.length>220?2:1;
+    streamText.textContent+=pending.slice(0,step);
+    pending=pending.slice(step);
+    msgs.scrollTop=msgs.scrollHeight;
+    const last=streamText.textContent.slice(-1);
+    const delay=/[.!?]/.test(last)?55:10;
+    setTimeout(()=>requestAnimationFrame(tick),delay);
+  }
+  return {
+    push(text){
+      if(!text)return;
+      pending+=text;
+      if(!typing)tick();
+    },
+    done(){
+      done=true;
+      finishIfReady();
+    },
+    flush(text){
+      pending='';
+      streamText.textContent=text||streamText.textContent;
+      msgs.scrollTop=msgs.scrollHeight;
+      done=true;typing=false;
+      finishIfReady();
+    }
+  };
+}
+
 async function send(){
   const inp=document.getElementById('inp'),btn=document.getElementById('sbtn'),msgs=document.getElementById('msgs');
   const t=inp.value.trim();if(!t)return;
@@ -1116,6 +1169,16 @@ async function send(){
   const streamText=b.querySelector('.stream-text');
   const cursor=b.querySelector('.cursor');
   const feedbackBox=b.querySelector('.feedback-box');
+  let fullText='';
+  let streamCompleted=false;
+  const finishAnswer=()=>{
+    if(streamCompleted)return;
+    streamCompleted=true;
+    cursor.style.display='none';
+    feedbackBox.classList.add('show');
+    btn.disabled=false;
+  };
+  const typewriter=createTypewriter(streamText,msgs,finishAnswer);
 
   try{
     cursor.style.display='inline';
@@ -1124,7 +1187,6 @@ async function send(){
     const reader=response.body.getReader();
     const decoder=new TextDecoder('utf-8');
     let buffer='';
-    let fullText='';
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
@@ -1138,18 +1200,17 @@ async function send(){
         try{evt=JSON.parse(line.slice(5).trim());}catch{continue;}
         if(evt.token){
           fullText+=evt.token;
-          streamText.textContent=fullText;
-          msgs.scrollTop=msgs.scrollHeight;
+          typewriter.push(evt.token);
         }
         if(evt.done){
           if(evt.session_id)SESSION_ID=evt.session_id;
-          cursor.style.display='none';
-          feedbackBox.classList.add('show');
-          btn.disabled=false;
+          typewriter.done();
         }
       }
     }
     if(!fullText){streamText.textContent='Cevap alınamadı. Lütfen tekrar deneyin.';}
+    if(fullText && !streamCompleted){typewriter.done();}
+    if(!fullText){finishAnswer();}
   }catch(e){
     streamText.textContent='Bağlantı hatası. Lütfen tekrar deneyin.';
     cursor.style.display='none';btn.disabled=false;

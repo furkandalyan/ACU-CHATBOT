@@ -14,12 +14,14 @@ from .services import (
     answer_question, retrieve_context, stream_ollama,
     build_fallback_answer, serialize_sources, normalize_text,
     expand_question_for_llm, sanitize_answer, _clean_for_llm,
+    build_direct_answer,
 )
 
 
 def should_expand_with_context(question: str) -> bool:
     lowered = question.strip().lower()
-    words = lowered.split()
+    normalized = normalize_text(question)
+    words = set(lowered.split()) | set(normalized.split())
     referential_markers = {
         "o",
         "bu",
@@ -36,7 +38,9 @@ def should_expand_with_context(question: str) -> bool:
         "aynı",
         "ayni",
     }
-    if any(word in referential_markers for word in words):
+    if any(word in referential_markers for word in words) or any(
+        word in {"baska", "diger", "devam"} for word in words
+    ):
         return True
     follow_up_markers = [
         "hangi ders",
@@ -550,6 +554,14 @@ def chat_stream_api(request):
 
         def generate():
             full_answer_parts = []
+
+            direct_answer = build_direct_answer(effective_question, contexts, history)
+            if direct_answer:
+                full_answer_parts.append(direct_answer)
+                yield sse_event({"token": direct_answer})
+                yield sse_event({"done": True, "session_id": str(session.session_id), "sources": sources_data})
+                ChatMessage.objects.create(session=session, question=question, answer=direct_answer)
+                return
 
             if not contexts or top_score < 6 or not generation_contexts:
                 fallback = build_fallback_answer(contexts)
