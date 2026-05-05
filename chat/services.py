@@ -830,7 +830,7 @@ def build_general_candidate_answer(
             "burs seçenekleri ve programın sağlayacağı imkanlarla birlikte tarafsız şekilde değerlendirilmelidir."
         )
 
-    if any(token in normalized for token in ["hocalarin isimlerini say", "hocalar isimlerini say", "hocalari say"]):
+    if normalized in {"hocalarin isimlerini say", "hocalar isimlerini say", "hocalari say"}:
         return (
             "Akademik kadro fakülte, bölüm ve anabilim dalına göre değişir. "
             "Belirli bir bölüm adıyla sorarsan o bölümün akademik personelini listeleyebilirim. "
@@ -1421,6 +1421,51 @@ def extract_staff_subject_tokens(question: str) -> list[str]:
     return [token for token in tokenize_query(question) if token not in ignored]
 
 
+def find_staff_subject_department(question: str) -> Department | None:
+    raw_tokens = extract_staff_subject_tokens(question)
+    if not raw_tokens:
+        return None
+
+    best: tuple[int, Department] | None = None
+    for department in Department.objects.all():
+        department_tokens = set(tokenize_query(department.name))
+        if not department_tokens:
+            continue
+        score = 0
+        for raw_token in raw_tokens:
+            if raw_token in department_tokens:
+                score += 4
+                continue
+            if any(raw_token.startswith(token) or token.startswith(raw_token) for token in department_tokens):
+                score += 2
+        if score and (best is None or score > best[0]):
+            best = (score, department)
+
+    return best[1] if best and best[0] >= 2 else None
+
+
+def resolve_staff_subject_tokens(question: str) -> list[str]:
+    raw_tokens = extract_staff_subject_tokens(question)
+    if not raw_tokens:
+        return []
+
+    department = find_staff_subject_department(question)
+    if department:
+        return [
+            token
+            for token in tokenize_query(department.name)
+            if token not in {"ingilizce", "turkce", "english"}
+        ]
+    return raw_tokens
+
+
+def resolve_staff_search_query(question: str, subject_tokens: list[str]) -> str:
+    department = find_staff_subject_department(question)
+    if department:
+        return re.sub(r"\s*\([^)]*\)", "", department.name).strip()
+    return " AND ".join(subject_tokens[:4])
+
+
 def format_staff_units(source: dict[str, Any]) -> str:
     faculty = first_source_value(source, "facultyname_primary")
     department = first_source_value(source, "departmentname_primary")
@@ -1432,14 +1477,14 @@ def build_staff_list_answer(question: str, contexts: list[RetrievedChunk]) -> st
     if not is_staff_list_query(question):
         return None
 
-    subject_tokens = extract_staff_subject_tokens(question)
+    subject_tokens = resolve_staff_subject_tokens(question)
     if not subject_tokens:
         return (
             "Akademik kadro fakülte, bölüm ve anabilim dalına göre değişir. "
             "Belirli bir bölüm adıyla sorarsan o bölümün akademik personelini listeleyebilirim. "
             "Genel hoca ismi uydurmamak için güncel akademik kadro/AVESİS sayfası kontrol edilmelidir."
         )
-    query = " AND ".join(subject_tokens[:4])
+    query = resolve_staff_search_query(question, subject_tokens)
     hits = search_avesis_researchers(query, size=30)
 
     staff: list[tuple[str, str]] = []
@@ -1454,7 +1499,7 @@ def build_staff_list_answer(question: str, contexts: list[RetrievedChunk]) -> st
             continue
         if "ogrenci grubu" in normalized_units:
             continue
-        if not any(token in normalized_units or token in normalized_name for token in subject_tokens):
+        if not all(token in normalized_units or token in normalized_name for token in subject_tokens):
             continue
         key = normalize_text(name)
         if key in seen:
@@ -2077,7 +2122,7 @@ def answer_question(
     cache_digest = hashlib.sha1(
         f"{language}:{normalized_cache_input}".encode("utf-8")
     ).hexdigest()
-    cache_key = f"chat:answer:v19:{cache_digest}"
+    cache_key = f"chat:answer:v20:{cache_digest}"
 
     cached = cache.get(cache_key)
     if cached is not None:

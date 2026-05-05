@@ -268,6 +268,47 @@ class AnswerQuestionTests(TestCase):
         self.assertNotIn("Öğrenci Grubu", result["answer"])
 
     @patch("chat.services.call_ollama")
+    @patch("chat.services.HTTP_SESSION.post")
+    def test_direct_staff_list_query_resolves_inflected_department_name(self, mock_post, mock_call_ollama):
+        faculty = Faculty.objects.create(name="Mühendislik ve Doğa Bilimleri Fakültesi")
+        Department.objects.create(faculty=faculty, name="Bilgisayar Mühendisliği (İngilizce)")
+        mock_post.return_value = SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "hits": {
+                    "hits": [
+                        {
+                            "_source": {
+                                "fullnamewithtitle_primary": "Prof. Dr. AHMET BULUT",
+                                "facultyname_primary": ["Mühendislik ve Doğa Bilimleri Fakültesi"],
+                                "departmentname_primary": ["Bilgisayar Mühendisliği Bölümü"],
+                                "programname_primary": "",
+                            }
+                        },
+                        {
+                            "_source": {
+                                "fullnamewithtitle_primary": "Dr. Öğr. Üyesi AYŞE KAYA",
+                                "facultyname_primary": ["Mühendislik ve Doğa Bilimleri Fakültesi"],
+                                "departmentname_primary": ["Bilgisayar Mühendisliği Bölümü"],
+                                "programname_primary": "",
+                            }
+                        },
+                    ]
+                }
+            },
+        )
+
+        result = answer_question("bilgisayar mühendisliğindeki hocaları sayar mısın")
+
+        self.assertFalse(mock_call_ollama.called)
+        self.assertEqual(result["meta"]["strategy"], "direct")
+        payload = mock_post.call_args.kwargs["json"]
+        query = payload["query"]["bool"]["must"][1]["query_string"]["query"]
+        self.assertEqual(query, "Bilgisayar Mühendisliği")
+        self.assertIn("AHMET BULUT", result["answer"])
+        self.assertIn("AYŞE KAYA", result["answer"])
+
+    @patch("chat.services.call_ollama")
     def test_direct_course_usage_query_lists_departments_from_course_table(self, mock_call_ollama):
         faculty = Faculty.objects.create(name="Sağlık Bilimleri Fakültesi")
         nutrition = Department.objects.create(faculty=faculty, name="Beslenme ve Diyetetik")
