@@ -170,7 +170,7 @@ class Course(models.Model):
     name        = models.CharField(max_length=300)
     description = models.TextField(blank=True)
     credits     = models.PositiveSmallIntegerField(null=True, blank=True)
-    semester    = models.CharField(max_length=20, blank=True)  # örn. "Güz", "Bahar"
+    semester    = models.CharField(max_length=50, blank=True)  # örn. "Güz", "Bahar"
     url         = models.URLField(max_length=1000, blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
 
