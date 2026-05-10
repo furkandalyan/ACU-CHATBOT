@@ -51,26 +51,39 @@ The system consists of three main components:
 
 ---
 
-## 🚀 Setup Instructions
+## 🚀 Docker Setup
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/furkandalyan/ACU-CHATBOT.git
-cd acibadem-chatbot
+git clone https://github.com/mahirfurkandalyan/ACU-CHATBOT.git
+cd ACU-CHATBOT
 ```
 
 ### 2. Configure Environment Variables
 
-Create a `.env` file based on `.env.example` and update the required values such as database credentials.
+The project runs with safe demo defaults, but you can create a local `.env` file to override them:
+
+```bash
+cp .env.example .env
+```
 
 ---
 
 ### 3. Start the Application
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
+
+This single command starts:
+
+* `web` - Django application and REST API
+* `postgres` - PostgreSQL 15 database for university content, chat history, and app data
+* `ollama` - local open-source LLM server
+* `ollama-pull` - one-time helper that downloads the configured Ollama model
+
+On first startup, downloading the LLM model can take several minutes. The default model is `qwen2.5:3b`; change `OLLAMA_MODEL` in `.env` if your computer needs a different model.
 
 ---
 
@@ -80,6 +93,51 @@ Once the containers are running:
 
 * Web Application: http://localhost:8000
 * API Endpoint: http://localhost:8000/api/chat/
+* Django Admin: http://localhost:8000/admin/
+
+Demo admin:
+
+```text
+username: admin
+password: admin123
+```
+
+Demo student numbers:
+
+```text
+221401001
+221401002
+221401003
+221401004
+```
+
+The current demo login flow accepts any non-empty password for seeded student users.
+
+### 5. Load University Data
+
+The database schema and demo users are prepared automatically by the web container. To collect public Acıbadem University content for the chatbot knowledge base, run:
+
+```bash
+docker compose exec web python scraper/run_all.py
+```
+
+For a lighter static scrape:
+
+```bash
+docker compose exec web python scraper/run_all.py --only bs4
+```
+
+The scraper only targets publicly available pages and includes delays in the scraping code to avoid aggressive requests.
+
+### Useful Docker Commands
+
+```bash
+docker compose ps
+docker compose logs -f web
+docker compose logs -f ollama
+docker compose down
+docker compose down -v
+```
 
 ---
 
