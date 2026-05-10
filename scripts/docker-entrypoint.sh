@@ -31,6 +31,16 @@ if [ "${DJANGO_COLLECTSTATIC:-1}" = "1" ]; then
   python manage.py collectstatic --noinput
 fi
 
+if [ "${DJANGO_LOAD_INITIAL_DATA:-1}" = "1" ] && [ -f "chat/fixtures/initial_university_data.json" ]; then
+  SHOULD_LOAD_INITIAL_DATA="$(python manage.py shell -c "from chat.models import UniversityContent; print('1' if UniversityContent.objects.count() == 0 else '0')")"
+  if [ "$SHOULD_LOAD_INITIAL_DATA" = "1" ]; then
+    echo "Loading initial university data..."
+    python manage.py loaddata initial_university_data
+  else
+    echo "Initial university data already exists; skipping fixture load."
+  fi
+fi
+
 if [ "${DJANGO_SEED_MOCK_USERS:-1}" = "1" ]; then
   python manage.py seed_mock_users
 fi
