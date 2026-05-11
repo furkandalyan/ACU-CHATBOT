@@ -1,4 +1,5 @@
 from django.db import models
+from pgvector.django import VectorField
 import uuid
 
 
@@ -117,6 +118,27 @@ class UniversityContent(models.Model):
 
     def __str__(self):
         return f"[{self.get_category_display()}] {self.title}"
+
+
+class ContentEmbedding(models.Model):
+    content = models.OneToOneField(
+        UniversityContent,
+        on_delete=models.CASCADE,
+        related_name="embedding_record",
+    )
+    model_name = models.CharField(max_length=200)
+    embedding = VectorField(dimensions=384)
+    text_hash = models.CharField(max_length=64, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["model_name"]),
+            models.Index(fields=["text_hash"]),
+        ]
+
+    def __str__(self):
+        return f"{self.content_id} - {self.model_name}"
 
 
 # ─────────────────────────────────────────────

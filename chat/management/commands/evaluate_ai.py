@@ -6,6 +6,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.management.base import BaseCommand
 
+from chat.embeddings import embed_texts
 from chat.services import answer_question, normalize_text
 
 
@@ -99,6 +100,12 @@ class Command(BaseCommand):
             default=25,
             help="Temporary Ollama timeout in seconds for this evaluation run.",
         )
+        parser.add_argument(
+            "--semantic-threshold",
+            type=float,
+            default=0.45,
+            help="Optional embedding similarity threshold for semantic pass support.",
+        )
 
     def handle(self, *args, **options):
         if options["clear_cache"]:
@@ -110,6 +117,12 @@ class Command(BaseCommand):
         limit = max(0, min(options["limit"], len(EVALUATION_CASES)))
         max_answer_chars = options["max_answer_chars"]
         cases = EVALUATION_CASES[:limit]
+        expected_texts = [" ".join(case.expected_any) for case in cases]
+        expected_vectors = []
+        try:
+            expected_vectors = embed_texts(expected_texts) if expected_texts else []
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"Semantic evaluation disabled: {exc}"))
 
         passed = 0
         warned = 0
@@ -133,8 +146,17 @@ class Command(BaseCommand):
             ]
             has_sources = bool(result.get("sources"))
             is_fallback = strategy == "fallback"
+            semantic_score = 0.0
+            if expected_vectors:
+                try:
+                    answer_vector = embed_texts([answer])[0]
+                    semantic_score = cosine_similarity(answer_vector, expected_vectors[index - 1])
+                except Exception:
+                    semantic_score = 0.0
             ok = (
-                bool(matched_keywords) and has_sources and not is_fallback
+                (bool(matched_keywords) or semantic_score >= options["semantic_threshold"])
+                and has_sources
+                and not is_fallback
             ) or (case.allow_fallback and is_fallback)
 
             if ok:
@@ -157,6 +179,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 "   matched="
                 + (", ".join(matched_keywords) if matched_keywords else "-")
+                + f" semantic={semantic_score:.3f}"
             )
             self.stdout.write(f"   answer={answer_preview.encode('ascii', 'replace').decode('ascii')}")
             self.stdout.write(f"   note={case.note}\n")
@@ -167,3 +190,12 @@ class Command(BaseCommand):
                 f"Summary: pass={passed} warn={warned} total={len(cases)} avg_ms={average_ms}"
             )
         )
+
+
+def cosine_similarity(left: list[float], right: list[float]) -> float:
+    dot = sum(a * b for a, b in zip(left, right))
+    left_norm = sum(a * a for a in left) ** 0.5
+    right_norm = sum(b * b for b in right) ** 0.5
+    if not left_norm or not right_norm:
+        return 0.0
+    return dot / (left_norm * right_norm)

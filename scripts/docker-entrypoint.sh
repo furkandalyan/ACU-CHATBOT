@@ -41,6 +41,10 @@ if [ "${DJANGO_LOAD_INITIAL_DATA:-1}" = "1" ] && [ -f "chat/fixtures/initial_uni
   fi
 fi
 
+if [ "${DJANGO_BUILD_EMBEDDINGS:-0}" = "1" ]; then
+  python manage.py rebuild_embeddings
+fi
+
 if [ "${DJANGO_SEED_MOCK_USERS:-1}" = "1" ]; then
   python manage.py seed_mock_users
 fi

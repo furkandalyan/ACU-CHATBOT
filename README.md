@@ -78,10 +78,13 @@ docker compose up --build
 
 This single command starts:
 
-* `web` - Django application and REST API
+* `nginx` - reverse proxy, static file front, and API rate limiter
+* `web` - Django application and REST API served by Gunicorn
 * `postgres` - PostgreSQL 15 database for university content, chat history, and app data
+* `redis` - shared cache backend for chatbot responses and AVESIS lookups
 * `ollama` - local open-source LLM server
 * `ollama-pull` - one-time helper that downloads the configured Ollama model
+* `scraper` - scheduled scraper worker that refreshes public university data
 
 On first startup, downloading the LLM model can take several minutes. The default model is `qwen2.5:3b`; change `OLLAMA_MODEL` in `.env` if your computer needs a different model.
 
@@ -113,21 +116,65 @@ Demo student numbers:
 
 The current demo login flow accepts any non-empty password for seeded student users.
 
-### 5. Load University Data
+### 5. University Data and Scraper
 
 The database schema and demo users are prepared automatically by the web container. To collect public Acıbadem University content for the chatbot knowledge base, run:
 
 ```bash
-docker compose exec web python scraper/run_all.py
+docker compose exec web python -m scraper.run_all
 ```
 
 For a lighter static scrape:
 
 ```bash
-docker compose exec web python scraper/run_all.py --only bs4
+docker compose exec web python -m scraper.run_all --only bs4
 ```
 
 The scraper only targets publicly available pages and includes delays in the scraping code to avoid aggressive requests.
+
+### Production-Oriented Docker Notes
+
+* The web container uses Gunicorn instead of Django `runserver`.
+* Nginx sits in front of Gunicorn and exposes `WEB_PORT` to the host.
+* Static files are collected at startup and served through WhiteNoise.
+* PostgreSQL, Redis, Ollama, and web containers have healthchecks.
+* Redis is used as the shared Django cache backend when `REDIS_URL` is set.
+* API endpoints are protected with basic Nginx request rate limits.
+* Retrieval uses PostgreSQL full-text search as a candidate layer when the database backend is PostgreSQL, then keeps the existing rule-based scoring for final ranking.
+* The scheduled scraper worker can be tuned with `SCRAPER_ONLY` and `SCRAPER_INTERVAL_SECONDS`.
+* Semantic retrieval is available through PostgreSQL + pgvector embeddings.
+
+### Semantic Search / Vector DB
+
+The project uses PostgreSQL with the `pgvector` extension for optional semantic retrieval. Build embeddings after the university data is loaded:
+
+```bash
+docker compose exec web python manage.py rebuild_embeddings
+```
+
+For a quick smoke test:
+
+```bash
+docker compose exec web python manage.py rebuild_embeddings --limit 20
+```
+
+Embeddings are generated with FastEmbed. The default model is:
+
+```text
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+```
+
+Set `DJANGO_BUILD_EMBEDDINGS=1` if you want Docker startup to refresh embeddings automatically. It is disabled by default because the first model download can take time.
+
+### Health and CI
+
+Health endpoint:
+
+```text
+http://localhost:8000/api/health/
+```
+
+GitHub Actions runs Django checks, tests, and Docker Compose config validation on pushes and pull requests.
 
 ### Useful Docker Commands
 

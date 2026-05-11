@@ -10,10 +10,14 @@ from urllib.parse import quote_plus, urljoin
 import requests
 from bs4 import BeautifulSoup
 from django.conf import settings
+from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.cache import cache
+from django.db import connection
 from django.db.models import Q
+from pgvector.django import CosineDistance
 
-from .models import Course, Department, Faculty, UniversityContent
+from .embeddings import embed_texts
+from .models import ContentEmbedding, Course, Department, Faculty, UniversityContent
 
 
 HTTP_SESSION = requests.Session()
@@ -297,11 +301,62 @@ def retrieve_context(question: str, language: str = "tr", limit: int = 6) -> lis
     normalized_question = normalize_text(question)
     chunks: list[RetrievedChunk] = []
     pricing_intent = has_pricing_intent(question)
+    person_intent = is_person_query(question)
 
     content_query = UniversityContent.objects.filter(is_active=True)
     if language:
         content_query = content_query.filter(language=language)
     base_content_query = content_query
+
+    if tokens and connection.vendor == "postgresql":
+        try:
+            query_vector = embed_texts([question])[0]
+            semantic_matches = (
+                ContentEmbedding.objects
+                .select_related("content")
+                .filter(content__is_active=True, content__language=language)
+                .annotate(distance=CosineDistance("embedding", query_vector))
+                .order_by("distance")[:24]
+            )
+            for match in semantic_matches:
+                item = match.content
+                distance = float(match.distance)
+                semantic_score = max(1, int((1.0 - min(distance, 1.0)) * 30))
+                if category and item.category == category:
+                    semantic_score += 4
+                chunks.append(
+                    RetrievedChunk(
+                        title=item.title,
+                        body=trim_text(item.content),
+                        source_type="semantic_content",
+                        url=item.url,
+                        category=item.category,
+                        language=item.language,
+                        score=semantic_score,
+                        matched_tokens=count_matched_tokens(item.content, item.title, tokens),
+                    )
+                )
+        except Exception as exc:
+            logger.warning("Semantic retrieval fallback: %s", exc)
+
+    if tokens and connection.vendor == "postgresql":
+        try:
+            search_query = SearchQuery(" ".join(tokens), config="simple", search_type="websearch")
+            search_vector = (
+                SearchVector("title", weight="A", config="simple")
+                + SearchVector("content", weight="B", config="simple")
+            )
+            fts_ids = list(
+                content_query
+                .annotate(search=search_vector, rank=SearchRank(search_vector, search_query))
+                .filter(search=search_query)
+                .order_by("-rank")
+                .values_list("id", flat=True)[:100]
+            )
+            if fts_ids:
+                content_query = content_query.filter(id__in=fts_ids)
+        except Exception as exc:
+            logger.warning("PostgreSQL full-text retrieval fallback: %s", exc)
 
     if tokens:
         content_filter = Q()
@@ -328,6 +383,10 @@ def retrieve_context(question: str, language: str = "tr", limit: int = 6) -> lis
         matched_tokens = count_matched_tokens(item.content, item.title, tokens)
         if category and item.category == category:
             score += 4
+        if person_intent and item.category == "faculty":
+            normalized_item_text = normalize_text(f"{item.title} {item.content}")
+            if "program yetkilileri" in normalized_item_text or "akademik personel" in normalized_item_text:
+                score += 20
         score += title_relevance_bonus(question, item.title, item.category)
         if score <= 0 and tokens:
             continue

@@ -4,6 +4,7 @@ from collections import OrderedDict
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connection
 from django.db.models import Count, Prefetch
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
@@ -16,6 +17,16 @@ from .services import (
     expand_question_for_llm, sanitize_answer, _clean_for_llm,
     build_direct_answer,
 )
+
+
+def health_api(request):
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        return JsonResponse({"status": "ok"})
+    except Exception as exc:
+        return JsonResponse({"status": "error", "detail": str(exc)}, status=503)
 
 
 def should_expand_with_context(question: str) -> bool:
