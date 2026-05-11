@@ -100,6 +100,7 @@ OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://ollama:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'mistral')
 OLLAMA_TIMEOUT = int(os.getenv('OLLAMA_TIMEOUT', '60'))
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+SEMANTIC_SEARCH_ENABLED = os.getenv("SEMANTIC_SEARCH_ENABLED", "False") == "True"
 
 REDIS_URL = os.getenv("REDIS_URL")
 if REDIS_URL:

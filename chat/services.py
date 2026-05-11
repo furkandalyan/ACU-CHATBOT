@@ -308,34 +308,36 @@ def retrieve_context(question: str, language: str = "tr", limit: int = 6) -> lis
         content_query = content_query.filter(language=language)
     base_content_query = content_query
 
-    if tokens and connection.vendor == "postgresql":
+    if tokens and settings.SEMANTIC_SEARCH_ENABLED and connection.vendor == "postgresql":
         try:
-            query_vector = embed_texts([question])[0]
-            semantic_matches = (
-                ContentEmbedding.objects
-                .select_related("content")
-                .filter(content__is_active=True, content__language=language)
-                .annotate(distance=CosineDistance("embedding", query_vector))
-                .order_by("distance")[:24]
-            )
-            for match in semantic_matches:
-                item = match.content
-                distance = float(match.distance)
-                semantic_score = max(1, int((1.0 - min(distance, 1.0)) * 30))
-                if category and item.category == category:
-                    semantic_score += 4
-                chunks.append(
-                    RetrievedChunk(
-                        title=item.title,
-                        body=trim_text(item.content),
-                        source_type="semantic_content",
-                        url=item.url,
-                        category=item.category,
-                        language=item.language,
-                        score=semantic_score,
-                        matched_tokens=count_matched_tokens(item.content, item.title, tokens),
-                    )
+            embedding_count = ContentEmbedding.objects.filter(content__is_active=True, content__language=language).count()
+            if embedding_count >= 20:
+                query_vector = embed_texts([question])[0]
+                semantic_matches = (
+                    ContentEmbedding.objects
+                    .select_related("content")
+                    .filter(content__is_active=True, content__language=language)
+                    .annotate(distance=CosineDistance("embedding", query_vector))
+                    .order_by("distance")[:24]
                 )
+                for match in semantic_matches:
+                    item = match.content
+                    distance = float(match.distance)
+                    semantic_score = max(1, int((1.0 - min(distance, 1.0)) * 30))
+                    if category and item.category == category:
+                        semantic_score += 4
+                    chunks.append(
+                        RetrievedChunk(
+                            title=item.title,
+                            body=trim_text(item.content),
+                            source_type="semantic_content",
+                            url=item.url,
+                            category=item.category,
+                            language=item.language,
+                            score=semantic_score,
+                            matched_tokens=count_matched_tokens(item.content, item.title, tokens),
+                        )
+                    )
         except Exception as exc:
             logger.warning("Semantic retrieval fallback: %s", exc)
 
@@ -387,6 +389,10 @@ def retrieve_context(question: str, language: str = "tr", limit: int = 6) -> lis
             normalized_item_text = normalize_text(f"{item.title} {item.content}")
             if "program yetkilileri" in normalized_item_text or "akademik personel" in normalized_item_text:
                 score += 20
+            if "bolum baskani" in normalized_item_text or "lang=tr" in item.url:
+                score += 3
+            if "prog. director" in normalized_item_text or "lang=en" in item.url:
+                score -= 2
         score += title_relevance_bonus(question, item.title, item.category)
         if score <= 0 and tokens:
             continue
