@@ -101,6 +101,23 @@ class AnswerQuestionTests(TestCase):
         self.assertEqual(result["meta"]["strategy"], "direct")
         self.assertIn("Bu kişiyle ilgili", result["answer"])
 
+    @patch("chat.services.build_avesis_person_answer")
+    def test_direct_person_query_prefers_program_official_source_before_avesis(self, mock_avesis):
+        UniversityContent.objects.create(
+            title="Program Yetkilileri – Bilgisayar Mühendisliği (İngilizce)",
+            content="Bölüm Başkanı Prof. Dr. Ahmet BULUT https://example.com",
+            category="faculty",
+            language="tr",
+            url="https://example.com/ahmet-bulut-official",
+        )
+
+        result = answer_question("Ahmet Bulut kimdir")
+
+        self.assertEqual(result["meta"]["strategy"], "direct")
+        self.assertIn("Ahmet BULUT", result["answer"])
+        self.assertIn("Bilgisayar Mühendisliği", result["answer"])
+        mock_avesis.assert_not_called()
+
     def test_direct_registration_dates_avoids_generic_hallucination(self):
         result = answer_question("Kayıt tarihleri?")
 
@@ -201,10 +218,12 @@ class AnswerQuestionTests(TestCase):
 
         self.assertFalse(mock_call_ollama.called)
         self.assertEqual(result["meta"]["strategy"], "direct")
-        self.assertIn("eğitim dili İngilizce", result["answer"])
-        self.assertIn("süresi 4 yıl", result["answer"])
+        self.assertIn("Bilgisayar Mühendisliği (İngilizce), Veri Bilimi ve Yapay Zeka", result["answer"])
+        self.assertIn("Eğitim dili İngilizce", result["answer"])
+        self.assertIn("program süresi 4 yıl", result["answer"])
         self.assertIn("mezuniyet unvanı Bilgisayar Mühendisi", result["answer"])
         self.assertIn("Veri Bilimi ve Yapay Zeka", result["answer"])
+        self.assertIn("İlk iki sene temel bilim, programlama ve algoritma formasyonu verilir", result["answer"])
 
     @patch("chat.services.call_ollama")
     def test_direct_opening_year_query_does_not_hallucinate(self, mock_call_ollama):

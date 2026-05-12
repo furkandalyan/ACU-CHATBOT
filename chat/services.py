@@ -308,6 +308,37 @@ def retrieve_context(question: str, language: str = "tr", limit: int = 6) -> lis
         content_query = content_query.filter(language=language)
     base_content_query = content_query
 
+    if person_intent:
+        name_tokens = extract_person_name_tokens(question)
+        if len(name_tokens) >= 2:
+            exact_person_query = base_content_query.filter(category="faculty")
+            for token in name_tokens:
+                exact_person_query = exact_person_query.filter(
+                    Q(title__icontains=token) | Q(content__icontains=token)
+                )
+
+            for item in exact_person_query[:12]:
+                normalized_item_text = normalize_text(f"{item.title} {item.content}")
+                score = score_text(item.content, item.title, tokens) + 40
+                if "program yetkilileri" in normalized_item_text:
+                    score += 24
+                if "bolum baskani" in normalized_item_text:
+                    score += 12
+                if "akademik personel" in normalized_item_text:
+                    score += 8
+                chunks.append(
+                    RetrievedChunk(
+                        title=item.title,
+                        body=trim_text(item.content, 500),
+                        source_type="university_content",
+                        url=item.url,
+                        category=item.category,
+                        language=item.language,
+                        score=score,
+                        matched_tokens=len(name_tokens),
+                    )
+                )
+
     if tokens and settings.SEMANTIC_SEARCH_ENABLED and connection.vendor == "postgresql":
         try:
             embedding_count = ContentEmbedding.objects.filter(content__is_active=True, content__language=language).count()
@@ -1904,8 +1935,29 @@ def extract_program_summary(content: str) -> str:
     if not match:
         return ""
     text = re.sub(r"\s+", " ", match.group(1)).strip()
-    first_sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
-    return first_sentence[:260].rstrip(" ,;")
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", text)
+        if sentence.strip()
+    ]
+    if not sentences:
+        return ""
+
+    selected: list[str] = []
+    total_length = 0
+    for sentence in sentences[:3]:
+        normalized_sentence = re.sub(r"\s+", " ", sentence).strip()
+        if not normalized_sentence:
+            continue
+        projected_length = total_length + len(normalized_sentence) + (1 if selected else 0)
+        if selected and projected_length > 520:
+            break
+        selected.append(normalized_sentence.rstrip(" ,;"))
+        total_length = projected_length
+        if total_length >= 360:
+            break
+
+    return " ".join(selected)[:520].rstrip(" ,;")
 
 
 def build_program_info_answer(question: str, contexts: list[RetrievedChunk]) -> str | None:
@@ -1926,22 +1978,32 @@ def build_program_info_answer(question: str, contexts: list[RetrievedChunk]) -> 
     }
     summary = extract_program_summary(content)
 
-    details = []
-    if fields["dil"]:
-        details.append(f"eğitim dili {fields['dil']}")
-    if fields["sure"]:
-        details.append(f"süresi {fields['sure']} yıl")
-    if fields["azami"]:
-        details.append(f"azami süresi {fields['azami']} yıl")
-    if fields["staj"]:
-        details.append(f"staj durumu: {fields['staj'].lower()}")
-    if fields["unvan"]:
-        details.append(f"mezuniyet unvanı {fields['unvan']}")
-
-    answer = f"{program_name} hakkında temel bilgiler: " + ", ".join(details) + "."
+    sentences = []
     if summary:
-        answer += f" Program içeriği özetle: {summary}"
-    return answer
+        sentences.append(f"{program_name}, {summary}")
+    else:
+        sentences.append(f"{program_name} programı hakkında temel program bilgileri bulunuyor.")
+
+    descriptors = []
+    if fields["dil"]:
+        descriptors.append(f"eğitim dili {fields['dil']}")
+    if fields["sure"]:
+        descriptors.append(f"program süresi {fields['sure']} yıl")
+    if fields["azami"]:
+        descriptors.append(f"azami süre {fields['azami']} yıl")
+    if descriptors:
+        descriptor_sentence = "; ".join(descriptors)
+        sentences.append(descriptor_sentence[0].upper() + descriptor_sentence[1:] + ".")
+
+    closing = []
+    if fields["staj"]:
+        closing.append(f"staj durumu {fields['staj'].lower()}")
+    if fields["unvan"]:
+        closing.append(f"mezuniyet unvanı {fields['unvan']}")
+    if closing:
+        sentences.append("Ayrıca " + " ve ".join(closing) + " olarak belirtiliyor.")
+
+    return " ".join(sentences)
 
 
 def build_program_opening_year_answer(question: str, contexts: list[RetrievedChunk]) -> str | None:
